@@ -345,6 +345,7 @@ def main(FLAGS):
 
     if use_real_world_data:
         # gen_data_loader.create_batches(real_data_train_file)
+        gen_data_loader.create_batches(real_data_train_file, limit_num_samples=generated_num)
         pass
     else:
         # First, use the oracle model to provide the positive examples, which are sampled from the oracle data distribution
