@@ -277,7 +277,7 @@ def main(FLAGS):
 
     config = tf.ConfigProto()
     config.gpu_options.allow_growth = True
-    config.gpu_options.per_process_gpu_memory_fraction = 0.3
+    # config.gpu_options.per_process_gpu_memory_fraction = 0.3
     sess = tf.Session(config=config)
     saver = tf.train.Saver(tf.trainable_variables(),max_to_keep=999999)
     sess.run(tf.global_variables_initializer())
