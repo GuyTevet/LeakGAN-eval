@@ -22,7 +22,7 @@ def generate_samples(sess, trainable_model, batch_size, generated_num, output_fi
     print('Generating samples...')
     # Generate Samples
     generated_samples = []
-    for _ in list(range(int(generated_num / batch_size))):
+    for _ in list(range(int(generated_num // batch_size))):
         generated_samples.extend(trainable_model.generate(sess,1.0,train))
 
     with open(output_file, 'w') as fout:
@@ -34,7 +34,7 @@ def generate_real_data_samples(sess, trainable_model, batch_size, generated_num,
     # Generate Samples
     print('Generating real data samples...')
     generated_samples = []
-    for _ in list(range(int(generated_num / batch_size))):
+    for _ in list(range(int(generated_num // batch_size))):
         generated_samples.extend(trainable_model.generate(sess,1.0,train))
 
     with open(output_file, 'w') as fout:
@@ -151,7 +151,7 @@ def rescale( reward, rollout_num=1.0):
 def get_reward(model,dis, sess, input_x, rollout_num, dis_dropout_keep_prob):
     rewards = []
     for i in range(rollout_num):
-        for given_num in range(1, model.sequence_length / model.step_size):
+        for given_num in range(1, model.sequence_length // model.step_size):
             real_given_num = given_num * model.step_size
             feed = {model.x: input_x, model.given_num: real_given_num, model.drop_out: 1.0}
             samples = sess.run(model.gen_for_reward, feed)
@@ -171,72 +171,12 @@ def get_reward(model,dis, sess, input_x, rollout_num, dis_dropout_keep_prob):
         if i == 0:
             rewards.append(ypred)
         else:
-            rewards[model.sequence_length / model.step_size - 1] += ypred
+            rewards[model.sequence_length // model.step_size - 1] += ypred
     rewards = rescale(np.array(rewards), rollout_num)
     rewards = np.transpose(np.array(rewards)) / (1.0 * rollout_num)  # batch_size x seq_length
     return rewards
 
 def main(FLAGS):
-
-# flags = tf.app.flags
-# FLAGS = flags.FLAGS
-# flags.DEFINE_boolean('restore', False, 'Training or testing a model')
-# flags.DEFINE_boolean('resD', False, 'Training or testing a D model')
-# flags.DEFINE_integer('length', 20, 'The length of toy data')
-# flags.DEFINE_string('model', "", 'Model NAME')
-# #########################################################################################
-# #  Generator  Hyper-parameters
-# ######################################################################################
-# EMB_DIM = 32 # embedding dimension
-# HIDDEN_DIM = 32 # hidden state dimension of lstm cell
-# SEQ_LENGTH = FLAGS.length # sequence length
-# START_TOKEN = 0
-# PRE_EPOCH_NUM = 80 # supervise (maximum likelihood estimation) epochs
-# SEED = 88
-# BATCH_SIZE = 64
-# LEARNING_RATE = 0.01
-# GOAL_SIZE = 16
-# STEP_SIZE = 4
-# #########################################################################################
-# #  Discriminator  Hyper-parameters
-# #########################################################################################
-# dis_embedding_dim = 64
-#
-#
-# dis_filter_sizes = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 15, 20]
-# dis_num_filters = [100, 200, 200, 200, 200, 100, 100, 100, 100, 100, 160, 160]
-# if FLAGS.length == 20:
-#     dis_filter_sizes = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 15, 20]
-#     dis_num_filters = [100, 200, 200, 200, 200, 100, 100, 100, 100, 100, 160, 160]
-#     LEARNING_RATE = 0.0015
-#     EMB_DIM = 32  # embedding dimension
-#     HIDDEN_DIM = 32  # hidden state dimension of lstm cell
-# elif FLAGS.length == 40:
-#     dis_filter_sizes = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 15, 20,30,40]
-#     dis_num_filters = [100, 200, 200, 200, 200, 100, 100, 100, 100, 100, 160, 160,160]
-#     LEARNING_RATE = 0.0005
-#     EMB_DIM = 64
-#     HIDDEN_DIM = 64
-# else:
-#     exit(0)
-# print(SEQ_LENGTH)
-#
-#
-# GOAL_OUT_SIZE = sum(dis_num_filters)
-#
-# dis_dropout_keep_prob = 1.0
-# dis_l2_reg_lambda = 0.2
-# dis_batch_size = 64
-#
-# #########################################################################################
-# #  Basic Training Parameters
-# #########################################################################################
-# TOTAL_BATCH = 800
-# positive_file = 'save/real_data.txt'
-# negative_file = 'save/generator_sample.txt'
-# eval_file = 'save/eval_file.txt'
-# generated_num = 10000
-# model_path = './ckpts'
 
     #########################################################################################
     #  Generator  Hyper-parameters
@@ -285,7 +225,7 @@ def main(FLAGS):
     #  Basic Training Parameters
     #########################################################################################
     EXPERIMENT_NAME = FLAGS.experiment_name
-    TOTAL_BATCH = FLAGS.num_epochs  # 200 #num of adversarial epochs
+    TOTAL_BATCH = FLAGS.num_epochs  # 800 #num of adversarial epochs
     positive_file = 'save/real_data_%0s.txt'%EXPERIMENT_NAME
     negative_file = 'save/generator_sample_%0s.txt'%EXPERIMENT_NAME
     eval_file = "save/eval_file_%0s"%EXPERIMENT_NAME
@@ -543,7 +483,7 @@ if __name__ == '__main__':
     #  General
     ######################################################################################
     parser.add_argument('experiment_name', type=str, help='experiment name')
-    parser.add_argument('--num_epochs', type=int, default=200, help='number of adversarial epochs [200]')
+    parser.add_argument('--num_epochs', type=int, default=800, help='number of adversarial epochs [800]')
     parser.add_argument('--seq_len', type=int, default=20, help='sequence length (must be >= 20 to fit disc arc) [20]')
     parser.add_argument('--batch_size', type=int, default=64, help='batch_size [64]')
     parser.add_argument('--gpu_inst', type=str, default='', help='choose GPU instance. empty string == run on CPU []')
@@ -554,7 +494,7 @@ if __name__ == '__main__':
     ######################################################################################
     parser.add_argument('--gen_emb_dim', type=int, default=32, help='generator embedding dimension [32]')
     parser.add_argument('--gen_hidden_dim', type=int, default=32, help='hidden state dimension of lstm cell [32]')
-    parser.add_argument('--pretrain_epoch_num', type=int, default=120, help='supervise (maximum likelihood estimation) epochs for generator [80]')
+    parser.add_argument('--pretrain_epoch_num', type=int, default=80, help='supervise (maximum likelihood estimation) epochs for generator [80]')
 
     #########################################################################################
     #  Discriminator  Hyper-parameters
