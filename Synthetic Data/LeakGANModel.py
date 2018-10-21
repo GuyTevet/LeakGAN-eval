@@ -300,6 +300,20 @@ class LeakGAN(object):
             self.worker_updates = worker_opt.apply_gradients(
                 list(zip(self.worker_grad, self.worker_params)),global_step=global_step_adv)
 
+        #######################################################################################################
+        #  LM evaluation
+        #######################################################################################################
+        with tf.name_scope("LM_evaluation"):
+            self.g_pred_for_eval = self.g_predictions # batch_size x seq_length x vocab_size
+            self.g_pred_sampled_stacked = tf.multinomial(tf.reshape(self.g_predictions,[-1, self.g_predictions.shape[2]]), 1, output_dtype=tf.int32)
+            self.g_pred_sampled = tf.reshape(self.g_pred_sampled_stacked,[self.g_pred_for_eval.shape[0],-1]) # batch_size x seq_length
+            self.g_pred_one_hot = tf.one_hot(self.g_pred_sampled, self.vocab_size, 1.0, 0.0)
+
+    def language_model_eval_step(self, sess, x):
+        # outputs = sess.run([self.g_pred_one_hot, self.g_predictions], feed_dict={self.x: x})
+        outputs = sess.run([self.g_pred_one_hot, self.g_pred_for_eval], feed_dict={self.x: x, self.drop_out: 1.0})
+        return outputs
+
     def rollout(self,input_x,given_num):
         with tf.device("/cpu:0"):
             processed_x = tf.transpose(tf.nn.embedding_lookup(self.g_embeddings,input_x),perm=[1, 0, 2])  # seq_length x batch_size x emb_dim
@@ -337,6 +351,8 @@ class LeakGAN(object):
                    tf.cond(((i) % self.step_size) > 0, lambda: real_sub_goal,
                            lambda: tf.constant(0.0, shape=[self.batch_size, self.goal_out_size])), \
                    tf.cond(((i) % self.step_size) > 0, lambda: real_goal, lambda: real_sub_goal), give_num
+
+
 
         # When current index i >= given_num, start roll-out, use the output as time step t as the input at time step t+1
         def _g_recurrence_2(i, x_t,gen_x,h_tm1,h_tm1_manager,last_goal,real_goal):
