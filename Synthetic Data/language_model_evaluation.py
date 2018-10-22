@@ -90,6 +90,7 @@ def language_model_evaluation(sess, tested_model, data_loader, is_test=False):
 
         BPC_direct = pred2BPC(real_pred, tested_model, batch)
         BPC_direct_list.append(BPC_direct)
+        print(BPC_direct)
 
     if is_test:
         return np.average(BPC_direct_list), np.average(BPC_approx_list)
