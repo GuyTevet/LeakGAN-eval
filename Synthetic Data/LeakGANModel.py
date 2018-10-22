@@ -167,12 +167,15 @@ class LeakGAN(object):
         g_predictions = tensor_array_ops.TensorArray(
             dtype=tf.float32, size=self.sequence_length,
             dynamic_size=False, infer_shape=True)
+        g_logits = tensor_array_ops.TensorArray(
+            dtype=tf.float32, size=self.sequence_length,
+            dynamic_size=False, infer_shape=True)
         ta_emb_x = tensor_array_ops.TensorArray(
             dtype=tf.float32, size=self.sequence_length)
         ta_emb_x = ta_emb_x.unstack(self.processed_x)
 
 
-        def preTrain(i,x_t,g_predictions,h_tm1,input_x,h_tm1_manager,last_goal,real_goal,feature_array,real_goal_array,sub_feature,all_sub_features,all_sub_goals):
+        def preTrain(i,x_t,g_logits,g_predictions,h_tm1,input_x,h_tm1_manager,last_goal,real_goal,feature_array,real_goal_array,sub_feature,all_sub_features,all_sub_goals):
             ## padding sentence by -1
             cur_sen = tf.split(tf.concat([tf.split(input_x,[i,self.sequence_length-i],1)[0],self.padding_array],1),[self.sequence_length,i],1)[0]  #padding sentence
             with tf.variable_scope(self.scope):
@@ -202,6 +205,7 @@ class LeakGAN(object):
             x_logits = tf.matmul(o_t_Worker, w_g)
             x_logits = tf.squeeze(x_logits)
 
+            g_logits = tf.cond(i>0,lambda :g_logits.write(i-1, x_logits),lambda :g_logits)
             g_predictions = tf.cond(i>0,lambda :g_predictions.write(i-1, tf.nn.softmax(x_logits)),lambda :g_predictions)
 
             sub_feature = tf.cond(((((i) % step_size) > 0)),
@@ -221,15 +225,15 @@ class LeakGAN(object):
             x_tp1 = tf.cond(i>0,lambda :ta_emb_x.read(i-1),
                                 lambda :x_t)
 
-            return i+1, x_tp1, g_predictions, h_t_Worker, input_x, h_t_manager,\
+            return i+1, x_tp1, g_logits, g_predictions, h_t_Worker, input_x, h_t_manager,\
                    tf.cond(((i)%step_size)>0,lambda:real_sub_goal,lambda :tf.constant(0.0,shape=[self.batch_size,self.goal_out_size])) ,\
                     tf.cond(((i) % step_size) > 0, lambda: real_goal, lambda: real_sub_goal),\
                    feature_array,real_goal_array,sub_feature,all_sub_features,all_sub_goals
 
-        _, _, self.g_predictions, _,_,_,_,_, self.feature_array, self.real_goal_array,self.sub_feature,self.all_sub_features,self.all_sub_goals = control_flow_ops.while_loop(
-            cond=lambda i, _1, _2, _3, _4, _5, _6,_7,_8,_9,_10,_11,_12: i < self.sequence_length+1,
+        _, _, self.g_logits, self.g_predictions, _,_,_,_,_, self.feature_array, self.real_goal_array,self.sub_feature,self.all_sub_features,self.all_sub_goals = control_flow_ops.while_loop(
+            cond=lambda i, _1, _2, _3, _4, _5, _6,_7,_8,_9,_10,_11,_12,_13: i < self.sequence_length+1,
             body=preTrain,
-            loop_vars=(tf.constant(0, dtype=tf.int32),tf.nn.embedding_lookup(self.g_embeddings, self.start_token),g_predictions,self.h0_worker,
+            loop_vars=(tf.constant(0, dtype=tf.int32),tf.nn.embedding_lookup(self.g_embeddings, self.start_token),g_logits, g_predictions,self.h0_worker,
                       self.x, self.h0_manager, tf.zeros([self.batch_size, self.goal_out_size]),self.goal_init, feature_array,real_goal_array,sub_feature,all_sub_features,all_sub_goals),
             parallel_iterations=1)
 
@@ -251,6 +255,7 @@ class LeakGAN(object):
         # self.real_goal_array = self.real_goal_array.stack()
 
         self.g_predictions = tf.transpose(self.g_predictions.stack(), perm=[1, 0, 2])  # batch_size x seq_length x vocab_size
+        self.g_logits = tf.transpose(self.g_logits.stack(), perm=[1, 0, 2])  # batch_size x seq_length x vocab_size
         self.cross_entropy = tf.reduce_sum(self.g_predictions * tf.log(tf.clip_by_value(self.g_predictions, 1e-20, 1.0))) / (
         self.batch_size * self.sequence_length * self.vocab_size)
 
@@ -304,14 +309,24 @@ class LeakGAN(object):
         #  LM evaluation
         #######################################################################################################
         with tf.name_scope("LM_evaluation"):
+
+            # direct prediction
             self.g_pred_for_eval = self.g_predictions # batch_size x seq_length x vocab_size
-            self.g_pred_sampled_stacked = tf.multinomial(tf.reshape(self.g_predictions,[-1, self.g_predictions.shape[2]]), 1, output_dtype=tf.int32)
-            self.g_pred_sampled = tf.reshape(self.g_pred_sampled_stacked,[self.g_pred_for_eval.shape[0],-1]) # batch_size x seq_length
-            self.g_pred_one_hot = tf.one_hot(self.g_pred_sampled, self.vocab_size, 1.0, 0.0)
+
+            # approx prediction
+            N = 2000 # HARD CODED
+            self.g_logits_stacked = tf.reshape(self.g_logits,[-1, self.vocab_size]) # (batch_size * seq_length) x vocab_size
+            self.g_samples_stacked = tf.multinomial(self.g_logits_stacked, N, output_dtype=tf.int32) # (batch_size * seq_length) x N [INT]
+            self.g_pred_one_hot = tf.one_hot(self.g_samples_stacked, self.vocab_size, 1.0, 0.0) # (batch_size * seq_length) x N x vocab_size
+            self.g_pred_approx = tf.clip_by_value(tf.reduce_mean(self.g_pred_one_hot,axis=1),clip_value_max=1.,clip_value_min=1e-20) # (batch_size * seq_length) x vocab_size
+            self.g_pred_approx_for_eval = tf.reshape(self.g_pred_approx,[self.batch_size,-1,self.vocab_size]) # batch_size x seq_length x vocab_size
+
+    def language_model_eval_step_direct_only(self, sess, x):
+        outputs = sess.run(self.g_pred_for_eval, feed_dict={self.x: x, self.drop_out: 1.0})
+        return outputs
 
     def language_model_eval_step(self, sess, x):
-        # outputs = sess.run([self.g_pred_one_hot, self.g_predictions], feed_dict={self.x: x})
-        outputs = sess.run([self.g_pred_one_hot, self.g_pred_for_eval], feed_dict={self.x: x, self.drop_out: 1.0})
+        outputs = sess.run([self.g_pred_for_eval,self.g_pred_approx_for_eval], feed_dict={self.x: x, self.drop_out: 1.0})
         return outputs
 
     def rollout(self,input_x,given_num):

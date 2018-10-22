@@ -20,7 +20,8 @@ SEED = 88
 START_TOKEN = 0
 use_real_world_data = True
 real_data_file_path = './data/text8'
-SEQ_LENGTH = 100#1000 #200
+RESULTS_PATH = './results.txt'
+SEQ_LENGTH = 100#1000 # 1000 is not feasible
 
 
 def restore_param_from_config(config_file,param):
@@ -72,52 +73,37 @@ def convergence_experiment(sess, tested_model, data_loader):
     return np.concatenate((np.expand_dims(indexes,axis=1),np.expand_dims(results,axis=1)),axis=1).transpose()
 
 
-def language_model_evaluation_direct(sess, tested_model, data_loader):
+def language_model_evaluation(sess, tested_model, data_loader, is_test=False):
 
     data_loader.reset_pointer()
-    BPC_list = []
+    BPC_direct_list = []
+    BPC_approx_list = []
 
     for it in tqdm(range(data_loader.num_batch)):
         batch = data_loader.next_batch()
-        pred_one_hot, real_pred = tested_model.language_model_eval_step(sess, batch)
-        real_pred = np.clip(real_pred,1e-20,1)
-        pred_flat = np.reshape(real_pred,[BATCH_SIZE * SEQ_LENGTH,tested_model.vocab_size])
-        batch_flat = np.reshape(batch,[BATCH_SIZE * SEQ_LENGTH])
+        if is_test:
+            real_pred,approx_pred = tested_model.language_model_eval_step(sess, batch)
+            BPC_approx = pred2BPC(approx_pred, tested_model, batch)
+            BPC_approx_list.append(BPC_approx)
+        else:
+            real_pred = tested_model.language_model_eval_step_direct_only(sess, batch)
 
-        #calc bit per char
-        BPC = np.average([-np.log2(pred_flat[i,batch_flat[i]]) for i in range(pred_flat.shape[0])])
-        BPC_list.append(BPC)
+        BPC_direct = pred2BPC(real_pred, tested_model, batch)
+        BPC_direct_list.append(BPC_direct)
 
+    if is_test:
+        return np.average(BPC_direct_list), np.average(BPC_approx_list)
+    else:
+        return np.average(BPC_direct_list), None
 
-    return np.average(BPC_list)
+def pred2BPC(pred,tested_model,test_data):
 
-def language_model_evaluation_by_approximation(sess, tested_model, data_loader):
+    real_pred = np.clip(pred, 1e-20, 1)
+    pred_flat = np.reshape(real_pred, [BATCH_SIZE * SEQ_LENGTH, tested_model.vocab_size])
+    batch_flat = np.reshape(test_data, [BATCH_SIZE * SEQ_LENGTH])
+    BPC = np.average([-np.log2(pred_flat[i, batch_flat[i]]) for i in range(pred_flat.shape[0])])
 
-    data_loader.reset_pointer()
-    BPC_list = []
-    N = 2000 #chosen N for the paper
-
-    for it in tqdm(range(data_loader.num_batch)):
-
-        batch = data_loader.next_batch()
-
-        approx_pred = np.zeros([BATCH_SIZE,SEQ_LENGTH,tested_model.vocab_size],dtype=np.float32)
-
-        for n in range(N):
-            pred_one_hot, real_pred = tested_model.language_model_eval_step(sess, batch)
-            approx_pred += pred_one_hot
-
-        approx_pred /= N * 1.
-        approx_pred = np.clip(approx_pred,1e-20,1)
-        pred_flat = np.reshape(approx_pred,[BATCH_SIZE * SEQ_LENGTH,tested_model.vocab_size])
-        batch_flat = np.reshape(batch,[BATCH_SIZE * SEQ_LENGTH])
-
-        #calc bit per char
-        BPC = np.average([-np.log2(pred_flat[i,batch_flat[i]]) for i in range(pred_flat.shape[0])])
-        BPC_list.append(BPC)
-
-
-    return np.average(BPC_list)
+    return BPC
 
 def main(FLAGS):
 
@@ -143,21 +129,6 @@ def main(FLAGS):
         vocab_size = 5000
         dis_data_loader = Dis_dataloader(BATCH_SIZE)
 
-    # if not use_real_world_data:
-    #     target_params = pickle.load(open('save/target_params.pkl'))
-    #     target_lstm = TARGET_LSTM(vocab_size, BATCH_SIZE, EMB_DIM, HIDDEN_DIM, SEQ_LENGTH, START_TOKEN, target_params) # The oracle model
-
-    # discriminator = Discriminator(sequence_length=SEQ_LENGTH, num_classes=2, vocab_size=vocab_size, embedding_size=dis_embedding_dim,
-    #                             filter_sizes=dis_filter_sizes, num_filters=dis_num_filters, l2_reg_lambda=dis_l2_reg_lambda)
-
-    # # tf.reset_default_graph()
-    # generator = LeakGAN(vocab_size, BATCH_SIZE, EMB_DIM, HIDDEN_DIM, SEQ_LENGTH, START_TOKEN)
-
-    # config = tf.ConfigProto()
-    # config.gpu_options.allow_growth = True
-    # sess = tf.Session(config=config)
-    # # sess.run(tf.global_variables_initializer())
-
     experiments_list = [exp for exp in os.listdir('ckp') if os.path.isdir(os.path.join('ckp',exp))]
     if FLAGS.epoch_exp:
         experiments_list.sort(key=lambda x: int(x.split('_epoch_')[-1]))
@@ -166,7 +137,6 @@ def main(FLAGS):
     for i, exp_name in enumerate(experiments_list):
         print('#########################################################################')
         print('loading model [%0s]...'%exp_name)
-
 
         # restore generator arch
         try:
@@ -179,11 +149,8 @@ def main(FLAGS):
             dis_embedding_dim = restore_param_from_config(config, param= 'dis_emb_dim')
             seq_len = restore_param_from_config(config, param= 'seq_len')
         except:
-            EMB_DIM = 32
-            HIDDEN_DIM = 32
-            dis_embedding_dim = 64
-            seq_len = 20
-            print("WARNING: CONFIG FILE WAS NOT FOUND - USING DEFAULT CONFIG")
+            print("ERROR: CONFIG FILE WAS NOT FOUND - skipping model")
+            continue
         assert type(EMB_DIM) == int
         assert type(HIDDEN_DIM) == int
         assert type(dis_embedding_dim) == int
@@ -261,12 +228,18 @@ def main(FLAGS):
         else:
             test_data_loader.create_batches(real_data_valid_file)
             print("USING TEXT8 VALID SET")
-        BPC_direct = language_model_evaluation_direct(sess,generator, test_data_loader)
-        print("[%0s] BPC_direct = %f"%(exp_name,BPC_direct))
+        BPC_direct, BPC_approx = language_model_evaluation(sess,generator, test_data_loader, is_test=FLAGS.test)
+
+        str = "[%0s] BPC_direct = %f"%(exp_name,BPC_direct)
+        with open(RESULTS_PATH, 'a') as f:
+            f.write(str + '\n')
+        print(str)
 
         if FLAGS.test:
-            BPC_approx = language_model_evaluation_by_approximation(sess, generator, test_data_loader)
-            print("[%0s] BPC_approx = %f" % (exp_name, BPC_approx))
+            str = "[%0s] BPC_approx = %f" % (exp_name, BPC_approx)
+            with open(RESULTS_PATH,'a') as f:
+                f.write(str + '\n')
+            print(str)
 
         if FLAGS.epoch_exp:
             stats[0, i] = int(exp_name.split('_epoch_')[-1])
