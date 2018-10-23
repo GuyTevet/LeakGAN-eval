@@ -10,7 +10,7 @@ import pickle
 import os
 import collections
 import json
-from tqdm import tqdm
+# from tqdm import tqdm
 from Main import *
 import argparse
 
@@ -79,7 +79,7 @@ def language_model_evaluation(sess, tested_model, data_loader, is_test=False):
     BPC_direct_list = []
     BPC_approx_list = []
 
-    for it in tqdm(range(data_loader.num_batch)):
+    for it in range(data_loader.num_batch):
         batch = data_loader.next_batch()
         if is_test:
             real_pred,approx_pred = tested_model.language_model_eval_step(sess, batch)
