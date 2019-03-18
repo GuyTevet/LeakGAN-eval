@@ -90,7 +90,7 @@ def language_model_evaluation(sess, tested_model, data_loader, is_test=False):
 
         BPC_direct = pred2BPC(real_pred, tested_model, batch)
         BPC_direct_list.append(BPC_direct)
-        print(BPC_direct)
+        # print(BPC_direct)
 
     if is_test:
         return np.average(BPC_direct_list), np.average(BPC_approx_list)
@@ -218,7 +218,11 @@ def main(FLAGS):
         #     results = convergence_experiment(sess, generator, test_data_loader)
         #     print('Saving results...')
         #     np.save('SeqGan_' + exp_name + '_conv_results',results)
-
+        if FLAGS.dump_samples:
+            print('###')
+            print('Saving samples file...')
+            generate_real_data_samples(sess, generator, BATCH_SIZE, BATCH_SIZE, "save/lm_eval_file_%0s.txt"%exp_name,
+                                       inv_charmap)
 
         print('###')
         print('Start Language Model Evaluation...')
@@ -255,6 +259,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="SeqGAN LM Test on Text8")
     parser.add_argument('--test', action='store_true')
     parser.add_argument('--epoch_exp', action='store_true')
+    parser.add_argument('--dump_samples', action='store_true')
     FLAGS = parser.parse_args()
 
     main(FLAGS)
